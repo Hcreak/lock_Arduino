@@ -1,45 +1,57 @@
-#include <Mouse.h>
-
 /**
     lockcode test
-      
-          Hcreak 2018.10.24
-          
- */
 
- 
+          Hcreak 2018.10.24
+
+*/
+
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
+//#include <ESP8266HTTPClient.h>
 
 #include <EEPROM.h>
 
-#include <ArduinoJson.h>
+//#include <ArduinoJson.h>
+#include <PubSubClient.h>
 
 struct config_type
 {
   char ssid[32];
   char psw[64];
 };
- 
 config_type config;
 
 int ClearPin = 14;
-const char* host="172.17.11.115";
 
+const char* mqtt_server = "172.20.0.145";
+const char* lockno = "i9P3DpKkrye";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+long lastMsg = 0;
+
+char* buildTopic(char* item)
+{
+//  char* Topic;
+//  pString = (char *)malloc( (strlen("I am a boy") + 1) * sizeof(char) ); strcpy(pString, "I am a boy")
+  String Topic = "/"+lockno+"/"+item;
+//  strcpy(Topic, "/");
+//  strcpy(Topic, lockno);
+//  strcpy(Topic, "/");
+//  strcpy(Topic, item);
+  Serial.print(Topic);
+  return Topic.c_str();
+}
 
 // 保存参数到EEPROM
 void saveConfig()
 {
-
   uint8_t *p = (uint8_t*)(&config);
   for (int i = 0; i < sizeof(config); i++)
   {
     EEPROM.write(i, *(p + i));
-  }      
+  }
   EEPROM.commit();
-
 }
- 
 
 // 从EEPROM加载参数
 void loadConfig()
@@ -49,21 +61,19 @@ void loadConfig()
   {
     *(p + i) = EEPROM.read(i);
   }
-
 }
 
 // 清空EEPROM
 void clearConfig()
 {
-  for (int i=0; i< sizeof(config); i++)
+  for (int i = 0; i < sizeof(config); i++)
   {
-    EEPROM.write(i,0); 
+    EEPROM.write(i, 0);
   }
   EEPROM.commit();
-  
-  while(1)
+
+  while (1)
     Serial.println("Fuck WatchDog");
-      
 }
 
 void smartConfig()
@@ -81,11 +91,11 @@ void smartConfig()
       Serial.printf("SSID:%s\r\n", WiFi.SSID().c_str());
       Serial.printf("PSW:%s\r\n", WiFi.psk().c_str());
       Serial.println(WiFi.localIP());
-      
+
       strcpy(config.ssid, WiFi.SSID().c_str());
       strcpy(config.psw, WiFi.psk().c_str());
       saveConfig();
-      
+
       break;
     }
   }
@@ -97,58 +107,49 @@ void beginConfig()
   Serial.printf("SSID:%s\r\n", config.ssid);
   Serial.printf("PSW:%s\r\n", config.psw);
   Serial.println("\r\WiFi begin");
-  WiFi.begin(config.ssid,config.psw);
+  WiFi.begin(config.ssid, config.psw);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 }
 
-void createJson()
-{
-  // StaticJsonBuffer 在栈区分配内存   它也可以被 DynamicJsonBuffer（内存在堆区分配） 代替
-  DynamicJsonBuffer  jsonBuffer;
- 
-  //创建根，也就是顶节点
-  JsonObject& root = jsonBuffer.createObject();
- 
-  root["lockno"] = "i9P3DpKkrye";
-  root["statu"] = 0;
-  root["charge"] = 97;
-  
-  root.printTo(Serial);//单行打印
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
   Serial.println();
-  root.prettyPrintTo(Serial);//多行打印
-  Serial.println();
-  
-  HTTPClient http;
-  http.begin(host,5000,"/");
-  String output;
-  root.printTo(output);
-  int httpCode = http.POST(output);
-  if (httpCode == HTTP_CODE_OK)
-  {
-     String payload = http.getString();
-     Serial.println(payload);
-     JsonObject& req = jsonBuffer.parseObject(payload);
-     if (req.success()) 
-     {
-        int no = req["no"];
-        const char* statu = req["statu"];
-        Serial.println(no);
-        Serial.println(statu);
-     }
-     else 
-     {
-        Serial.println("parseObject() failed");
-     }
-     
-  } 
-  else 
-  {
-     String payload = http.getString();
-     Serial.print("context:");
-     Serial.println(payload);
+
+//  if ((char)payload[0] == '1') {
+//    digitalWrite(BUILTIN_LED, LOW);   // Turn the LED on (Note that LOW is the voltage level
+//    // but actually the LED is on; this is because
+//    // it is acive low on the ESP-01)
+//  } else {
+//    digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
+//  }
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(lockno)) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish(buildTopic("heart"), "hello world");
+      // ... and resubscribe
+      client.subscribe(buildTopic("call"));
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
   }
 }
 
@@ -156,23 +157,36 @@ void setup()
 {
   Serial.begin(115200);
   Serial.println("Start module");
-  pinMode(ClearPin,INPUT);
-  
-  EEPROM.begin(1024); 
-  attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , RISING);
-     
-  if(EEPROM.read(0)==0)
+  pinMode(ClearPin, INPUT_PULLUP);
+
+  EEPROM.begin(1024);
+  attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
+
+  if (EEPROM.read(0) == 0)
     smartConfig();
   else
-    beginConfig();  
+    beginConfig();
+  Serial.println(WiFi.localIP());
+
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
 }
 
 
 void loop()
 {
-  delay(5000);
-  Serial.println(WiFi.localIP());
-  
-  createJson();
-  
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  long now = millis();
+  if (now - lastMsg > 5000) {
+    lastMsg = now;
+    char* msg = (char*)analogRead(A0);
+
+    Serial.print("Publish message: ");
+    Serial.println(msg);
+    client.publish(buildTopic("statu"), msg);
+  }
 }
