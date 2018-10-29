@@ -31,15 +31,13 @@ long lastMsg = 0;
 
 char* buildTopic(char* item)
 {
-//  char* Topic;
-//  pString = (char *)malloc( (strlen("I am a boy") + 1) * sizeof(char) ); strcpy(pString, "I am a boy")
-  String Topic = "/"+lockno+"/"+item;
-//  strcpy(Topic, "/");
-//  strcpy(Topic, lockno);
-//  strcpy(Topic, "/");
-//  strcpy(Topic, item);
+  char* Topic;  
+  strcat(Topic, "/");
+  strcat(Topic, lockno);
+  strcat(Topic, "/");
+  strcat(Topic, item);
   Serial.print(Topic);
-  return Topic.c_str();
+  return Topic;
 }
 
 // 保存参数到EEPROM
