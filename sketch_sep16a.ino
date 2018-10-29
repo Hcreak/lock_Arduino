@@ -28,16 +28,19 @@ const char* lockno = "i9P3DpKkrye";
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastMsg = 0;
+char* Topic_char = NULL;
 
 char* buildTopic(char* item)
 {
-  char* Topic;  
-  strcat(Topic, "/");
-  strcat(Topic, lockno);
-  strcat(Topic, "/");
-  strcat(Topic, item);
-  Serial.print(Topic);
-  return Topic;
+  String Topic;
+  Topic.concat("/");
+  Topic.concat(lockno);
+  Topic.concat("/");
+  Topic.concat(item);
+  Serial.println(Topic);
+  Topic_char = (char *)malloc(Topic.length() * sizeof(char));
+  strcpy(Topic_char,Topic.c_str()); // 注意c_str与其String生命周期相同 造成指针游离
+  return Topic_char;
 }
 
 // 保存参数到EEPROM
@@ -101,6 +104,7 @@ void smartConfig()
 
 void beginConfig()
 {
+  WiFi.mode(WIFI_STA);
   loadConfig();
   Serial.printf("SSID:%s\r\n", config.ssid);
   Serial.printf("PSW:%s\r\n", config.psw);
@@ -144,6 +148,11 @@ void reconnect() {
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
+      if (client.state()==-2)
+      {
+        WiFi.reconnect();
+        Serial.println(WiFi.localIP());
+      }
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
@@ -181,7 +190,7 @@ void loop()
   long now = millis();
   if (now - lastMsg > 5000) {
     lastMsg = now;
-    char* msg = (char*)analogRead(A0);
+    char* msg = "a";
 
     Serial.print("Publish message: ");
     Serial.println(msg);
