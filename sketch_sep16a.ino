@@ -9,8 +9,9 @@
 //#include <ESP8266HTTPClient.h>
 
 #include <EEPROM.h>
+#include "FS.h"
 
-//#include <ArduinoJson.h>
+#include <ArduinoJson.h>
 #include <PubSubClient.h>
 
 struct config_type
@@ -22,13 +23,59 @@ config_type config;
 
 int ClearPin = 14;
 
-const char* mqtt_server = "172.20.0.145";
-const char* lockno = "i9P3DpKkrye";
+const char* mqtt_server;
+const char* lockno;
+const char* lpassword;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 long lastMsg = 0;
 char* Topic_char = NULL;
+
+bool loadAuthInfo()
+{
+  if (!SPIFFS.begin())
+  {
+    Serial.println("Failed to mount file system");
+    return false;
+  }
+
+  File InfoFile = SPIFFS.open("/AuthInfo.json", "r");
+  if (!InfoFile) {
+    Serial.println("Failed to open config file");
+    return false;
+  }
+
+  size_t size = InfoFile.size();
+  if (size > 1024) {
+    Serial.println("Config file size is too large");
+    return false;
+  }
+
+  // Allocate a buffer to store contents of the file.
+  std::unique_ptr<char[]> buf(new char[size]);
+
+  // We don't use String here because ArduinoJson library requires the input
+  // buffer to be mutable. If you don't use ArduinoJson, you may as well
+  // use configFile.readString instead.
+  InfoFile.readBytes(buf.get(), size);
+
+  // StaticJsonBuffer 静态分配内存 DynamicJsonBuffer 动态分配内存
+//  DynamicJsonBuffer  jsonBuffer;
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& json = jsonBuffer.parseObject(buf.get());
+
+  if (!json.success()) {
+    Serial.println("Failed to parse config file");
+    return false;
+  }
+
+  mqtt_server = json["mqtt_server"];
+  lockno = json["lockno"];
+  lpassword = json["lpassword"];
+
+  return true;
+}
 
 char* buildTopic(char* item)
 {
@@ -39,7 +86,7 @@ char* buildTopic(char* item)
   Topic.concat(item);
   Serial.println(Topic);
   Topic_char = (char *)malloc(Topic.length() * sizeof(char));
-  strcpy(Topic_char,Topic.c_str()); // 注意c_str与其String生命周期相同 造成指针游离
+  strcpy(Topic_char, Topic.c_str()); // 注意c_str与其String生命周期相同 造成指针游离
   return Topic_char;
 }
 
@@ -125,13 +172,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println();
 
-//  if ((char)payload[0] == '1') {
-//    digitalWrite(BUILTIN_LED, LOW);   // Turn the LED on (Note that LOW is the voltage level
-//    // but actually the LED is on; this is because
-//    // it is acive low on the ESP-01)
-//  } else {
-//    digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
-//  }
+  //  if ((char)payload[0] == '1') {
+  //    digitalWrite(BUILTIN_LED, LOW);   // Turn the LED on (Note that LOW is the voltage level
+  //    // but actually the LED is on; this is because
+  //    // it is acive low on the ESP-01)
+  //  } else {
+  //    digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
+  //  }
 }
 
 void reconnect() {
@@ -139,16 +186,18 @@ void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
-    if (client.connect(lockno)) {
+    if (client.connect(lockno,lockno,lpassword)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish(buildTopic("heart"), "hello world");
+      client.publish(buildTopic("statu"), "1");
+      client.publish(buildTopic("charge"), "97");
       // ... and resubscribe
       client.subscribe(buildTopic("call"));
+      client.subscribe(buildTopic("ping"));
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      if (client.state()==-2)
+      if (client.state() == -2)
       {
         WiFi.reconnect();
         Serial.println(WiFi.localIP());
@@ -168,17 +217,22 @@ void setup()
 
   EEPROM.begin(1024);
   attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
-
   if (EEPROM.read(0) == 0)
     smartConfig();
   else
     beginConfig();
   Serial.println(WiFi.localIP());
 
+  if (!loadAuthInfo()) {
+    Serial.println("Failed to load config");
+    clearConfig();
+  } else {
+    Serial.println("Config loaded");
+  }
+
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 }
-
 
 void loop()
 {
@@ -187,13 +241,4 @@ void loop()
   }
   client.loop();
 
-  long now = millis();
-  if (now - lastMsg > 5000) {
-    lastMsg = now;
-    char* msg = "a";
-
-    Serial.print("Publish message: ");
-    Serial.println(msg);
-    client.publish(buildTopic("statu"), msg);
-  }
 }
