@@ -14,6 +14,8 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 
+#include <Servo.h>
+
 struct config_type
 {
   char ssid[32];
@@ -22,10 +24,16 @@ struct config_type
 config_type config;
 
 int ClearPin = 14;
+int ServoPin = 12;
+int HallPin = 16;
+Servo myservo;
 
 const char* mqtt_server;
 char* lockno;
 char* lpassword;
+
+int statu = -2;
+int charge = 0;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -197,7 +205,8 @@ void reconnect() {
       Serial.println("connected");
       client.subscribe(buildTopic("call"));
    // client.subscribe(buildTopic("ping"));
-      EXPORT();    
+   // EXPORT();
+      readval();
     } 
     else 
     {
@@ -218,13 +227,47 @@ void reconnect() {
 void UNLOCK()
 {
   Serial.println("UNLOCK");
+  myservo.write(70);
+  delay(500);
+  myservo.write(0);
 }
 
 void EXPORT()
 {
   Serial.println("EXPORT");
-  client.publish(buildTopic("statu"), "1");
-  client.publish(buildTopic("charge"), "97");
+  char* sc = (char *)malloc(1 * sizeof(char));
+  char* cc = (char *)malloc(3 * sizeof(char));
+  sprintf(sc, "%d", statu);
+  sprintf(cc, "%d", charge);;
+  client.publish(buildTopic("statu"), sc);
+  client.publish(buildTopic("charge"), cc);
+}
+
+void readval()
+{
+  while(1){
+    int Hall = 0;
+    for (int i=0;i<5;i++) { 
+      Hall += digitalRead(HallPin);
+      delay(10);
+    }
+    if (Hall == 5) {
+    // Serial.println("1*5,UNLOCK");
+      if (statu != 0) {
+        statu = 0;
+        EXPORT();
+      }
+      return ;
+    }
+    if (Hall == 0) {
+    // Serial.println("0*5,LOCK");
+      if (statu != 1) {
+        statu = 1;
+        EXPORT();
+      }
+      return ;
+    }
+  }
 }
 
 void setup()
@@ -232,7 +275,8 @@ void setup()
   Serial.begin(115200);
   Serial.println("Start module");
   pinMode(ClearPin, INPUT_PULLUP);
-
+  pinMode(HallPin, INPUT);
+  
   EEPROM.begin(1024);
   attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
   if (EEPROM.read(0) == 0)
@@ -248,6 +292,9 @@ void setup()
     Serial.println("Config loaded");
   }
 
+  myservo.attach(ServoPin);
+  myservo.write(0);
+
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 }
@@ -258,5 +305,10 @@ void loop()
     reconnect();
   }
   client.loop();
-
+  
+  long now = millis();
+  if (now - lastMsg > 1000) {
+    lastMsg = now;
+    readval();
+  }
 }
