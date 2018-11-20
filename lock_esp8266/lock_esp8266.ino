@@ -200,7 +200,7 @@ void reconnect() {
   {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
-    if (client.connect(lockno,lockno,lpassword)) 
+    if (client.connect(lockno,lockno,lpassword,buildTopic("statu"),0,1,"-2")) 
     {
       Serial.println("connected");
       client.subscribe(buildTopic("call"));
@@ -239,8 +239,8 @@ void EXPORT()
   char* cc = (char *)malloc(3 * sizeof(char));
   sprintf(sc, "%d", statu);
   sprintf(cc, "%d", charge);;
-  client.publish(buildTopic("statu"), sc);
-  client.publish(buildTopic("charge"), cc);
+  client.publish(buildTopic("statu"), sc, true);
+  client.publish(buildTopic("charge"), cc, true);
 }
 
 void readval()
