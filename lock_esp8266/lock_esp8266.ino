@@ -16,6 +16,10 @@
 
 #include <Servo.h>
 
+#define HallPin 5
+#define M_IN1 14
+#define M_IN2 12
+
 struct config_type
 {
   char ssid[32];
@@ -23,19 +27,22 @@ struct config_type
 };
 config_type config;
 
-int ClearPin = 14;
-int ServoPin = 12;
-int HallPin = 16;
-Servo myservo;
+int ClearPin = 4;
+//int ServoPin = 12;
+//int HallPin = 5;
+//Servo myservo;
 
 const char* mqtt_server;
 char* lockno;
 char* lpassword;
 
 int statu = -2;
-int charge = 0;
+//int charge = 0;
 
 WiFiClient espClient;
+//BearSSL::WiFiClientSecure espclient;
+//const uint8_t fp[20] = {0x5F, 0xF1, 0x60, 0x31, 0x09, 0x04, 0x3E, 0xF2, 0x90, 0xD2, 0xB0, 0x8A, 0x50, 0x38, 0x04, 0xE8, 0x37, 0x9F, 0xBC, 0x76};
+//espclient.setFingerprint(fp);
 PubSubClient client(espClient);
 long lastMsg = 0;
 char* Topic_char = NULL;
@@ -134,8 +141,7 @@ void clearConfig()
   }
   EEPROM.commit();
 
-  while (1)
-    Serial.println("Fuck WatchDog");
+  ESP.restart();
 }
 
 void smartConfig()
@@ -186,12 +192,18 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println();
 
-  if ((char)payload[0] == 'u') {
-    UNLOCK();
+  switch(payload[0])
+  {
+    case 'u':
+      UNLOCK();
+      break;
+    case 'e':
+      EXPORT();
+      break;
+    case 'o':
+      OTA();
+      break;
   }
-  if ((char)payload[0] == 'e') {
-    EXPORT();
-  } 
 }
 
 void reconnect() {
@@ -227,20 +239,41 @@ void reconnect() {
 void UNLOCK()
 {
   Serial.println("UNLOCK");
-  myservo.write(70);
-  delay(500);
-  myservo.write(0);
+//  myservo.write(70);
+//  delay(500);
+//  myservo.write(0);
+  digitalWrite(14,LOW);
+  digitalWrite(12,HIGH);
+  delay(250);
+  digitalWrite(14,LOW);
+  digitalWrite(12,LOW);
 }
 
 void EXPORT()
 {
   Serial.println("EXPORT");
   char* sc = (char *)malloc(1 * sizeof(char));
-  char* cc = (char *)malloc(3 * sizeof(char));
+  //char* cc = (char *)malloc(3 * sizeof(char));
   sprintf(sc, "%d", statu);
-  sprintf(cc, "%d", charge);;
+  //sprintf(cc, "%d", charge);;
   client.publish(buildTopic("statu"), sc, true);
-  client.publish(buildTopic("charge"), cc, true);
+  //client.publish(buildTopic("charge"), cc, true);
+}
+
+void OTA()
+{
+//  t_httpUpdate_return ret = ESPhttpUpdate.update("http://sakura.xeonphi.cn/lock/firmware");
+//  switch(ret) {
+//    case HTTP_UPDATE_FAILED:
+//        Serial.println("[update] Update failed.");
+//        break;
+//    case HTTP_UPDATE_NO_UPDATES:
+//        Serial.println("[update] Update no Update.");
+//        break;
+//    case HTTP_UPDATE_OK:
+//        Serial.println("[update] Update ok."); // may not called we reboot the ESP
+//        break;
+//  }
 }
 
 void readval()
@@ -262,6 +295,13 @@ void readval()
     if (Hall == 0) {
     // Serial.println("0*5,LOCK");
       if (statu != 1) {
+        if (statu == 0) {
+          digitalWrite(14,HIGH);
+          digitalWrite(12,LOW);
+          delay(250);
+          digitalWrite(14,LOW);
+          digitalWrite(12,LOW);
+        }
         statu = 1;
         EXPORT();
       }
@@ -276,6 +316,8 @@ void setup()
   Serial.println("Start module");
   pinMode(ClearPin, INPUT_PULLUP);
   pinMode(HallPin, INPUT);
+  pinMode(M_IN1, OUTPUT);
+  pinMode(M_IN2, OUTPUT);
   
   EEPROM.begin(1024);
   attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
@@ -292,8 +334,8 @@ void setup()
     Serial.println("Config loaded");
   }
 
-  myservo.attach(ServoPin);
-  myservo.write(0);
+//  myservo.attach(ServoPin);
+//  myservo.write(0);
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
