@@ -19,6 +19,7 @@
 #define HallPin 5
 #define M_IN1 14
 #define M_IN2 12
+#define tonePin 4
 
 struct config_type
 {
@@ -27,7 +28,7 @@ struct config_type
 };
 config_type config;
 
-int ClearPin = 4;
+//int ClearPin = 4;
 //int ServoPin = 12;
 //int HallPin = 5;
 //Servo myservo;
@@ -114,6 +115,8 @@ char* buildTopic(char* item)
 // 保存参数到EEPROM
 void saveConfig()
 {
+  clearConfig();
+  
   uint8_t *p = (uint8_t*)(&config);
   for (int i = 0; i < sizeof(config); i++)
   {
@@ -141,7 +144,14 @@ void clearConfig()
   }
   EEPROM.commit();
 
-  ESP.restart();
+//  ESP.restart();
+}
+
+void tonePlay()
+{
+  tone(tonePin,200);
+  delay(500);
+  noTone(tonePin);
 }
 
 void smartConfig()
@@ -149,10 +159,13 @@ void smartConfig()
   WiFi.mode(WIFI_STA);
   Serial.println("\r\nWait for Smartconfig");
   WiFi.beginSmartConfig();
+  int i = 0;
   while (1)
   {
     delay(1000);
     Serial.print(".");
+    tonePlay();
+    
     if (WiFi.smartConfigDone())
     {
       Serial.println("SmartConfig Success");
@@ -164,23 +177,29 @@ void smartConfig()
       strcpy(config.psw, WiFi.psk().c_str());
       saveConfig();
 
-      break;
+      ESP.restart();
     }
+    i+= 1;
+    if (i==20) { break; }
   }
 }
 
-void beginConfig()
+bool beginConfig()
 {
   WiFi.mode(WIFI_STA);
   loadConfig();
-  Serial.printf("SSID:%s\r\n", config.ssid);
+  Serial.println("SSID:%s\r\n", config.ssid);
   Serial.printf("PSW:%s\r\n", config.psw);
   Serial.println("\r\WiFi begin");
   WiFi.begin(config.ssid, config.psw);
+  int i = 0;
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+    i += 1;
+    if (i==60) { return 0; }
   }
+  return 1;
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -314,22 +333,28 @@ void setup()
 {
   Serial.begin(115200);
   Serial.println("Start module");
-  pinMode(ClearPin, INPUT_PULLUP);
+//  pinMode(ClearPin, INPUT_PULLUP);
   pinMode(HallPin, INPUT);
   pinMode(M_IN1, OUTPUT);
   pinMode(M_IN2, OUTPUT);
   
   EEPROM.begin(1024);
-  attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
-  if (EEPROM.read(0) == 0)
+//  attachInterrupt(digitalPinToInterrupt(ClearPin), clearConfig , FALLING);
+  while(EEPROM.read(0) == 0) 
+  { 
     smartConfig();
-  else
-    beginConfig();
+  }
+  
+  while(!beginConfig())
+  {
+    smartConfig();
+  }
+  
   Serial.println(WiFi.localIP());
 
   if (!loadAuthInfo()) {
     Serial.println("Failed to load config");
-    clearConfig();
+    ESP.restart();
   } else {
     Serial.println("Config loaded");
   }
