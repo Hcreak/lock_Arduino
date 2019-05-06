@@ -3,7 +3,7 @@ int M_EN = 1;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  pinMode(5,INPUT);
+  pinMode(5,INPUT_PULLUP);
   pinMode(14,OUTPUT);
   pinMode(12,OUTPUT);
 }

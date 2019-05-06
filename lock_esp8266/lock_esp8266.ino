@@ -7,6 +7,7 @@
 
 #include <ESP8266WiFi.h>
 //#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
 
 #include <EEPROM.h>
 #include "FS.h"
@@ -14,12 +15,15 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 
-#include <Servo.h>
+// #include <Servo.h>
+// #include "Ticker.h"
 
 #define HallPin 5
 #define M_IN1 14
 #define M_IN2 12
 #define tonePin 4
+
+ADC_MODE(ADC_VCC);
 
 struct config_type
 {
@@ -46,6 +50,9 @@ WiFiClient espClient;
 //espclient.setFingerprint(fp);
 PubSubClient client(espClient);
 long lastMsg = 0;
+
+//Ticker myTicker;
+
 char* Topic_char = NULL;
 
 bool loadAuthInfo()
@@ -160,27 +167,27 @@ void smartConfig()
   Serial.println("\r\nWait for Smartconfig");
   WiFi.beginSmartConfig();
   int i = 0;
-  while (1)
+  while (WiFi.status() != WL_CONNECTED)
   {
     delay(1000);
     Serial.print(".");
     tonePlay();
-    
-    if (WiFi.smartConfigDone())
-    {
-      Serial.println("SmartConfig Success");
-      Serial.printf("SSID:%s\r\n", WiFi.SSID().c_str());
-      Serial.printf("PSW:%s\r\n", WiFi.psk().c_str());
-      Serial.println(WiFi.localIP());
-
-      strcpy(config.ssid, WiFi.SSID().c_str());
-      strcpy(config.psw, WiFi.psk().c_str());
-      saveConfig();
-
-      ESP.restart();
-    }
     i+= 1;
-    if (i==20) { break; }
+    if (i==20) { return; }
+  }
+  if (WiFi.smartConfigDone())
+  {
+    Serial.println("SmartConfig Success");
+    Serial.printf("SSID:%s\r\n", WiFi.SSID().c_str());
+    Serial.printf("PSW:%s\r\n", WiFi.psk().c_str());
+    Serial.println(WiFi.localIP());
+
+    strcpy(config.ssid, WiFi.SSID().c_str());
+    strcpy(config.psw, WiFi.psk().c_str());
+    saveConfig();
+
+    delay(1000);
+    ESP.restart();
   }
 }
 
@@ -188,7 +195,7 @@ bool beginConfig()
 {
   WiFi.mode(WIFI_STA);
   loadConfig();
-  Serial.println("SSID:%s\r\n", config.ssid);
+  Serial.printf("SSID:%s\r\n", config.ssid);
   Serial.printf("PSW:%s\r\n", config.psw);
   Serial.println("\r\WiFi begin");
   WiFi.begin(config.ssid, config.psw);
@@ -261,11 +268,11 @@ void UNLOCK()
 //  myservo.write(70);
 //  delay(500);
 //  myservo.write(0);
-  digitalWrite(14,LOW);
-  digitalWrite(12,HIGH);
+  digitalWrite(M_IN1,LOW);
+  digitalWrite(M_IN2,HIGH);
   delay(250);
-  digitalWrite(14,LOW);
-  digitalWrite(12,LOW);
+  digitalWrite(M_IN1,LOW);
+  digitalWrite(M_IN2,LOW);
 }
 
 void EXPORT()
@@ -281,51 +288,49 @@ void EXPORT()
 
 void OTA()
 {
-//  t_httpUpdate_return ret = ESPhttpUpdate.update("http://sakura.xeonphi.cn/lock/firmware");
-//  switch(ret) {
-//    case HTTP_UPDATE_FAILED:
-//        Serial.println("[update] Update failed.");
-//        break;
-//    case HTTP_UPDATE_NO_UPDATES:
-//        Serial.println("[update] Update no Update.");
-//        break;
-//    case HTTP_UPDATE_OK:
-//        Serial.println("[update] Update ok."); // may not called we reboot the ESP
-//        break;
-//  }
+  t_httpUpdate_return ret = ESPhttpUpdate.update("http://sakura.xeonphi.cn/lock/firmware"); // 80 301 443 !!!
+  switch(ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.println("[update] Update failed.");
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("[update] Update no Update.");
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("[update] Update ok."); // may not called we reboot the ESP
+      break;
+  }
 }
 
 void readval()
 {
-  while(1){
-    int Hall = 0;
-    for (int i=0;i<5;i++) { 
-      Hall += digitalRead(HallPin);
-      delay(10);
+  int Hall = 0;
+  for (int i=0;i<5;i++) { 
+    Hall += digitalRead(HallPin);
+    delay(10);
+  }
+  if (Hall == 5) {
+  // Serial.println("1*5,UNLOCK");
+    if (statu != 0) {
+      statu = 0;
+      EXPORT();
     }
-    if (Hall == 5) {
-    // Serial.println("1*5,UNLOCK");
-      if (statu != 0) {
-        statu = 0;
-        EXPORT();
+    return ;
+  }
+  if (Hall == 0) {
+  // Serial.println("0*5,LOCK");
+    if (statu != 1) {
+      if (statu == 0) {
+        digitalWrite(M_IN1,HIGH);
+        digitalWrite(M_IN2,LOW);
+        delay(250);
+        digitalWrite(M_IN1,LOW);
+        digitalWrite(M_IN2,LOW);
       }
-      return ;
+      statu = 1;
+      EXPORT();
     }
-    if (Hall == 0) {
-    // Serial.println("0*5,LOCK");
-      if (statu != 1) {
-        if (statu == 0) {
-          digitalWrite(14,HIGH);
-          digitalWrite(12,LOW);
-          delay(250);
-          digitalWrite(14,LOW);
-          digitalWrite(12,LOW);
-        }
-        statu = 1;
-        EXPORT();
-      }
-      return ;
-    }
+    return ;
   }
 }
 
@@ -333,8 +338,12 @@ void setup()
 {
   Serial.begin(115200);
   Serial.println("Start module");
+
+  Serial.print("System voltage(mV): ");
+  Serial.println(ESP.getVcc());
+
 //  pinMode(ClearPin, INPUT_PULLUP);
-  pinMode(HallPin, INPUT);
+  pinMode(HallPin, INPUT_PULLUP);
   pinMode(M_IN1, OUTPUT);
   pinMode(M_IN2, OUTPUT);
   
@@ -364,6 +373,8 @@ void setup()
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
+
+//  myTicker.attach(1.5, readval);
 }
 
 void loop()
@@ -373,9 +384,9 @@ void loop()
   }
   client.loop();
   
-  long now = millis();
-  if (now - lastMsg > 1000) {
-    lastMsg = now;
-    readval();
-  }
+   long now = millis();
+   if (now - lastMsg > 1000) {
+     lastMsg = now;
+     readval();
+   }
 }
